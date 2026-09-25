@@ -41,14 +41,11 @@ function pintarLayout() {
   actualizarConteos();
 }
 
-/** Número de tickets activos en el menú */
+/** Número de tickets activos en el menú (viene en meta: no hace falta otra consulta) */
 function actualizarConteos() {
-  if (!veTodo()) return;
-  srv('tickets.listar').then(ts => {
-    const n = ts.filter(t => ESTADOS_ACTIVOS.includes(t.Estado)).length;
-    const el = document.querySelector('[data-conteo="/tickets"]');
-    if (el) { el.textContent = n; el.classList.toggle('oculto', !n); }
-  }).catch(() => {});
+  const n = App.meta.ticketsActivos;
+  const el = document.querySelector('[data-conteo="/tickets"]');
+  if (el && n !== null && n !== undefined) { el.textContent = n; el.classList.toggle('oculto', !n); }
 }
 
 // ---------- Login ----------
@@ -100,6 +97,7 @@ async function salir() {
 
 function cerrarSesionLocal() {
   App.token = null; App.meta = null; App.refs = {};
+  vaciarCacheLecturas();
   try { sessionStorage.removeItem(CLAVE_SESION); } catch (e) { /* nada */ }
   pintarLogin('Sesión cerrada. Ingrese su correo para volver a entrar.');
 }

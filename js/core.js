@@ -74,30 +74,70 @@ function indicadorCarga(delta) {
   if (cargas <= 0 && el) el.remove();
 }
 
-/** Llama a la API de Apps Script. En desarrollo (dev/index.html) usa el simulador local. */
+// Acciones de solo lectura (igual que LECTURAS_ en Api.gs): se reutilizan unos minutos al navegar
+const LECTURAS = ['meta', 'listar', 'tickets.listar', 'tickets.detalle', 'accesos.cuentas', 'software.resumen', 'disponibilidad.calcularMes',
+  'indicadores.calcular', 'tablero', 'alertas', 'capacitaciones.encuestas', 'auditorias.informe'];
+const TTL_LECTURAS = 2 * 60 * 1000;
+const cacheLecturas = new Map();
+const vaciarCacheLecturas = () => cacheLecturas.clear();
+const clonar = d => (typeof structuredClone === 'function' ? structuredClone(d) : JSON.parse(JSON.stringify(d)));
+const idSolicitud = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
+
+/**
+ * Llama a la API de Apps Script. En desarrollo (dev/index.html) usa el simulador local.
+ * Las lecturas se guardan 2 minutos en memoria; cualquier escritura vacía esa memoria.
+ * Las escrituras llevan idSolicitud para poder reintentarlas sin duplicar (ver api() en Api.gs).
+ */
 function srv(accion, datos) {
+  const lectura = LECTURAS.includes(accion);
   const cuerpo = { accion, datos: datos || {}, token: App.token };
+  const clave = accion + '|' + JSON.stringify(cuerpo.datos);
+  if (lectura) {
+    const c = cacheLecturas.get(clave);
+    if (c && c.token === App.token && Date.now() - c.t < TTL_LECTURAS) return c.p.then(clonar);
+  } else {
+    cuerpo.idSolicitud = idSolicitud();
+    vaciarCacheLecturas();
+  }
   indicadorCarga(1);
   const llamada = window.__DEV__ ? viaSimulador(cuerpo) : viaFetch(cuerpo);
-  return llamada.then(r => {
+  const p = llamada.then(r => {
     if (r && r.ok) return r.data;
     if (r && r.sesionExpirada && App.token) { cerrarSesionLocal(); aviso(r.error, 'error'); }
     throw new Error(r ? r.error : 'Sin respuesta del servidor');
-  }).finally(() => indicadorCarga(-1));
+  }).finally(() => {
+    indicadorCarga(-1);
+    if (!lectura) vaciarCacheLecturas(); // también si falló: la escritura pudo aplicarse
+  });
+  if (!lectura) return p;
+  cacheLecturas.set(clave, { t: Date.now(), token: App.token, p });
+  p.catch(() => { if (cacheLecturas.get(clave) && cacheLecturas.get(clave).p === p) cacheLecturas.delete(clave); });
+  return p.then(clonar);
 }
 
+/**
+ * Google responde con una redirección a una URL de eco de un solo uso que a veces devuelve 404
+ * (sin cabecera CORS, por eso el navegador lo reporta como error de red). Se reintenta: las lecturas
+ * no cambian nada y las escrituras se reconocen por idSolicitud, así que no se duplican.
+ */
 async function viaFetch(cuerpo) {
   const url = (window.GTI_CONFIG || {}).API_URL;
   if (!url) throw new Error('Falta configurar la URL de la API en config.js.');
-  let res;
-  try {
-    // text/plain evita la consulta previa (preflight) de CORS, que Apps Script no responde
-    res = await fetch(url, { method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(cuerpo) });
-  } catch (e) {
-    throw new Error('No se pudo conectar con el servidor. Revise su conexión e intente de nuevo.');
+  const INTENTOS = 3;
+  let ultimo = null;
+  for (let i = 1; i <= INTENTOS; i++) {
+    try {
+      // text/plain evita la consulta previa (preflight) de CORS, que Apps Script no responde
+      const res = await fetch(url, { method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(cuerpo) });
+      if (!res.ok) throw new Error('El servidor respondió con error ' + res.status + '.');
+      const texto = await res.text();
+      try { return JSON.parse(texto); } catch (e) { throw new Error('Respuesta inválida del servidor (¿la implementación permite acceso a "Cualquier usuario"?).'); }
+    } catch (e) {
+      ultimo = e instanceof TypeError ? new Error('No se pudo conectar con el servidor. Revise su conexión e intente de nuevo.') : e;
+      if (i < INTENTOS) await new Promise(r => setTimeout(r, 700 * i));
+    }
   }
-  if (!res.ok) throw new Error('El servidor respondió con error ' + res.status + '.');
-  try { return await res.json(); } catch (e) { throw new Error('Respuesta inválida del servidor (¿la implementación permite acceso a "Cualquier usuario"?).'); }
+  throw ultimo;
 }
 
 function viaSimulador(cuerpo) {

@@ -179,8 +179,8 @@ async function vistaEntidad(cont, entidad, op) {
   op = op || {};
   const e = Ent(entidad);
   const refs = [...new Set(e.fields.filter(f => f.type === 'ref').map(f => f.ref))];
-  await cargarRefs(refs);
-  let filas = await (op.cargar ? op.cargar() : srv('listar', { entidad }));
+  // Listas de referencia y registros en paralelo
+  let [, filas] = await Promise.all([cargarRefs(refs), op.cargar ? op.cargar() : srv('listar', { entidad })]);
   const recargar = async () => {
     filas = await (op.cargar ? op.cargar() : srv('listar', { entidad }));
     invalidarRef(entidad);
