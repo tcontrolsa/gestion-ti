@@ -1,9 +1,9 @@
-/* Fase 1 Firebase (docs/firebase-fase1.md): ingreso por enlace, tickets activos en vivo desde Firestore.
+/* Fase 1 Firebase (docs/firebase-fase1.md): tickets activos en vivo desde Firestore.
+ * Ingreso: el código de 6 dígitos de Apps Script devuelve un token personalizado que abre la sesión de Firebase.
  * Se activa con GTI_CONFIG.MODO = 'firebase'; en otro caso nada de esto se usa y todo sigue por Apps Script. */
 'use strict';
 
 const Fb = { activo: false, auth: null, db: null, correo: null, usuario: null, general: {}, escuchas: [], sesionAS: null };
-const CLAVE_CORREO_INGRESO = 'gti_correo_ingreso';
 
 function fbIniciar() {
   const cfg = window.GTI_CONFIG || {};
@@ -24,31 +24,22 @@ function fbError(e) {
   const c = (e && e.code) || '';
   if (/permission-denied/.test(c)) return new Error('No tiene permiso para esta acción, o el dato cambió mientras tanto. Actualice la pantalla.');
   if (/unavailable|network/.test(c)) return new Error('Sin conexión con el servidor. Revise su red; los cambios se reintentarán.');
-  if (/invalid-action-code|expired-action-code/.test(c)) return new Error('El enlace ya se usó o venció. Pida uno nuevo.');
+  if (/invalid-custom-token|custom-token-mismatch|invalid-credential/.test(c)) return new Error('No se pudo abrir la sesión. Pida un código nuevo; si se repite, avise a TI.');
   if (/invalid-email/.test(c)) return new Error('Correo inválido.');
   if (/too-many-requests|quota/.test(c)) return new Error('Demasiados intentos. Espere unos minutos.');
+  // Configuración del proyecto de Firebase: la resuelve el administrador en la consola
+  if (/configuration-not-found/.test(c) || /CONFIGURATION_NOT_FOUND/.test(e && e.message))
+    return new Error('Authentication no está activado en el proyecto de Firebase. Avise a TI.');
   return e instanceof Error ? e : new Error(String(e));
 }
 
-// ---------- Ingreso por enlace ----------
+// ---------- Ingreso ----------
 
-async function fbEnviarEnlace(correo) {
-  correo = String(correo || '').trim().toLowerCase();
-  const url = location.href.split('#')[0].split('?')[0];
-  try { await Fb.auth.sendSignInLinkToEmail(correo, { url, handleCodeInApp: true }); } catch (e) { throw fbError(e); }
-  try { localStorage.setItem(CLAVE_CORREO_INGRESO, correo); } catch (e) { /* se pedirá al abrir el enlace */ }
-}
-
-/** Si la página se abrió desde el enlace del correo, completa el ingreso. Devuelve true si lo hizo. */
-async function fbCompletarEnlace(pedirCorreo) {
-  if (!Fb.auth.isSignInWithEmailLink(location.href)) return false;
-  let correo = null;
-  try { correo = localStorage.getItem(CLAVE_CORREO_INGRESO); } catch (e) { /* nada */ }
-  if (!correo) correo = await pedirCorreo(); // abierto en otro navegador: se confirma el correo
-  try { await Fb.auth.signInWithEmailLink(correo, location.href); } catch (e) { throw fbError(e); }
-  try { localStorage.removeItem(CLAVE_CORREO_INGRESO); } catch (e) { /* nada */ }
-  history.replaceState(null, '', location.pathname + location.hash);
-  return true;
+/** Abre la sesión de Firebase con el token firmado por Apps Script y devuelve los datos de arranque */
+async function fbIngresar(firebaseToken) {
+  if (!firebaseToken) throw new Error('El servidor no entregó la sesión de Firebase. Avise a TI.');
+  try { await Fb.auth.signInWithCustomToken(firebaseToken); } catch (e) { throw fbError(e); }
+  return fbArranque();
 }
 
 function fbUsuarioActual() {
@@ -59,7 +50,8 @@ function fbUsuarioActual() {
 
 async function fbArranque() {
   const u = Fb.auth.currentUser;
-  Fb.correo = u.email.toLowerCase();
+  Fb.correo = String((await u.getIdTokenResult()).claims.correo || '').toLowerCase();
+  if (!Fb.correo) { await Fb.auth.signOut(); throw new Error('Vuelva a ingresar con su correo.'); }
   let doc;
   try { doc = await Fb.db.collection('usuarios').doc(Fb.correo).get(); } catch (e) { doc = null; }
   if (!doc || !doc.exists || !doc.data().activo) {
