@@ -60,11 +60,23 @@ function pintarLogin(mensaje) {
       email = inp.value.trim();
       const b = form.querySelector('button'); b.disabled = true;
       try { const r = await pendiente(b, srv('auth.solicitarCodigo', { email })); aviso(r.mensaje); paso2(); }
-      catch (err) { fallo(err); b.disabled = false; }
+      catch (err) {
+        b.disabled = false;
+        // Límite de códigos: los que ya llegaron siguen sirviendo, así que se pasa igual a escribir el código
+        if (/Demasiadas solicitudes/.test(err.message)) { aviso('Ya pidió varios códigos: use el más reciente que le llegó.', 'error'); paso2(); }
+        else fallo(err);
+      }
+    };
+    const yaTengo = e => {
+      e.preventDefault();
+      email = inp.value.trim();
+      if (!inp.checkValidity() || !email) return inp.reportValidity();
+      paso2();
     };
     const form = h('form', { onsubmit: enviar },
       h('div.campo', h('label', { for: 'lg-email' }, 'Correo corporativo'), inp),
-      h('button.btn.primario', { type: 'submit', style: 'width:100%;justify-content:center;margin-top:14px' }, 'Enviarme un código'));
+      h('button.btn.primario', { type: 'submit', style: 'width:100%;justify-content:center;margin-top:14px' }, 'Enviarme un código'),
+      h('button.btn', { type: 'button', style: 'width:100%;justify-content:center;margin-top:8px', onclick: yaTengo }, 'Ya tengo un código'));
     vaciar(caja).append(marcaLogin(), h('p', mensaje || 'Ingrese su correo. Le enviaremos un código de acceso de un solo uso; no necesita contraseña.'), form);
     setTimeout(() => inp.focus(), 20);
   };
