@@ -75,8 +75,8 @@ function pintarLogin(mensaje) {
       try {
         const r = await srv('auth.verificarCodigo', { email, codigo: inp.value });
         App.token = r.token;
-        try { sessionStorage.setItem(CLAVE_SESION, r.token); } catch (x) { /* sin almacenamiento: la sesión dura lo que la pestaña */ }
-        await iniciarApp();
+        try { localStorage.setItem(CLAVE_SESION, r.token); } catch (x) { /* sin almacenamiento: la sesión dura lo que la pestaña */ }
+        await iniciarApp(r.arranque);
       } catch (err) { fallo(err); b.disabled = false; inp.select(); }
     } },
       h('div.campo', h('label', { for: 'lg-codigo' }, 'Código enviado a ' + email), inp),
@@ -98,13 +98,25 @@ async function salir() {
 function cerrarSesionLocal() {
   App.token = null; App.meta = null; App.refs = {};
   vaciarCacheLecturas();
-  try { sessionStorage.removeItem(CLAVE_SESION); } catch (e) { /* nada */ }
+  try { localStorage.removeItem(CLAVE_SESION); sessionStorage.removeItem(CLAVE_SESION); } catch (e) { /* nada */ }
   pintarLogin('Sesión cerrada. Ingrese su correo para volver a entrar.');
 }
 
 // ---------- Arranque ----------
-async function iniciarApp() {
-  App.meta = await srv('meta');
+function pintarErrorArranque(e) {
+  const caja = h('div.login-caja', marcaLogin(), h('p', e.message),
+    h('button.btn.primario', { style: 'width:100%;justify-content:center', onclick: async ev => {
+      ev.currentTarget.disabled = true;
+      try { await iniciarApp(); } catch (err) { if (App.token) pintarErrorArranque(err); }
+    } }, 'Reintentar'));
+  vaciar(document.body).append(h('main.login', caja));
+}
+
+/** arranque = {meta, tablero}: llega con el ingreso o se pide en un solo viaje al servidor */
+async function iniciarApp(arranque) {
+  const a = arranque || await srv('arranque');
+  App.meta = a.meta;
+  if (a.tablero) sembrarLectura('tablero', { periodo: a.tablero.periodo }, a.tablero.datos);
   App.refs = {};
   pintarLayout();
   mostrarRuta(rutaInicial());
@@ -114,7 +126,11 @@ function rutaInicial() { return rutaActual() === '/' ? inicioSegunRol() : rutaAc
 
 document.addEventListener('DOMContentLoaded', async () => {
   window.addEventListener('hashchange', () => mostrarRuta(rutaActual()));
-  try { App.token = sessionStorage.getItem(CLAVE_SESION); } catch (e) { App.token = null; }
+  // La sesión se recuerda en el navegador (vence tras 6 h sin uso o al pulsar Salir): abrir otra pestaña no pide código
+  try { App.token = localStorage.getItem(CLAVE_SESION) || sessionStorage.getItem(CLAVE_SESION); } catch (e) { App.token = null; }
   if (!App.token) return pintarLogin();
-  try { await iniciarApp(); } catch (e) { cerrarSesionLocal(); }
+  try { await iniciarApp(); } catch (e) {
+    // Sesión vencida: srv ya mostró el ingreso. Falla de red: no se borra la sesión (evita pedir otro código)
+    if (App.token) pintarErrorArranque(e);
+  }
 });

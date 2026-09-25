@@ -75,7 +75,7 @@ function indicadorCarga(delta) {
 }
 
 // Acciones de solo lectura (igual que LECTURAS_ en Api.gs): se reutilizan unos minutos al navegar
-const LECTURAS = ['meta', 'listar', 'tickets.listar', 'tickets.detalle', 'accesos.cuentas', 'software.resumen', 'disponibilidad.calcularMes',
+const LECTURAS = ['meta', 'arranque', 'listar', 'tickets.listar', 'tickets.detalle', 'accesos.cuentas', 'software.resumen', 'disponibilidad.calcularMes',
   'indicadores.calcular', 'tablero', 'alertas', 'capacitaciones.encuestas', 'auditorias.informe'];
 const TTL_LECTURAS = 2 * 60 * 1000;
 const cacheLecturas = new Map();
@@ -138,6 +138,11 @@ async function viaFetch(cuerpo) {
     }
   }
   throw ultimo;
+}
+
+/** Guarda en la memoria de lecturas un resultado que ya llegó (p. ej. el tablero dentro del arranque) */
+function sembrarLectura(accion, datos, resultado) {
+  cacheLecturas.set(accion + '|' + JSON.stringify(datos || {}), { t: Date.now(), token: App.token, p: Promise.resolve(resultado) });
 }
 
 function viaSimulador(cuerpo) {
