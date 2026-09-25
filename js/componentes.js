@@ -91,6 +91,7 @@ function tabla(op) {
   const filtros = h('div.filtros');
   if (op.buscar !== false) {
     const b = h('input', { type: 'search', placeholder: 'Buscar…', 'aria-label': 'Buscar en la tabla', oninput: e => { estado.texto = e.target.value; estado.pagina = 0; pintar(); } });
+    if (App.buscarInicial) { estado.texto = b.value = App.buscarInicial; App.buscarInicial = ''; b.classList.add('resaltado'); }
     filtros.append(b);
   }
   (op.filtros || []).forEach(fl => {

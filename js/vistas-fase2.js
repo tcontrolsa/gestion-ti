@@ -3,7 +3,7 @@
 
 /** Pestañas estándar: [[nombre, async fn(zona)]] */
 async function pestanas(cont, titulo, codigo, lista) {
-  let actual = 0;
+  let actual = Math.min(tomarPestana(), lista.length - 1);
   const barra = h('div.pestanas', { role: 'tablist' });
   const zona = h('div');
   const pintar = async () => {

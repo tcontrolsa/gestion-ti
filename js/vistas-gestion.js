@@ -41,10 +41,12 @@ ruta('/', async cont => {
       h('div.tarjeta', h('h2', 'Evolución de indicadores ' + periodo.slice(0, 4)), h('div.grafico', h('canvas#g-ind', { 'aria-label': 'Indicadores porcentuales por mes', role: 'img' })))));
     const alertas = d.alertas;
     zona.append(h('div.rejilla.r2', { style: 'margin-top:16px' },
-      h('div.tarjeta', h('h2', 'Requiere atención (' + alertas.length + ')'),
-        alertas.length ? h('ul.alertas', alertas.slice(0, 40).map(a => h('li', h('span.punto.p-' + a.nivel, { title: 'Prioridad ' + a.nivel }),
-          h('div', h('div', h('b', a.titulo)), h('div.tenue.peq', a.modulo + ' · ' + a.detalle))))) : h('p.tenue', 'Sin alertas.'),
-        alertas.length > 40 ? h('p.tenue.peq', '… y ' + (alertas.length - 40) + ' más') : null),
+      h('div.tarjeta', h('div.encabezado', { style: 'margin-bottom:6px' }, h('h2', { style: 'margin:0' }, 'Requiere atención (' + alertas.length + ')'),
+          esTI() ? h('button.btn.chico', { type: 'button', onclick: () => ir('/pendientes') }, 'Ver en Pendientes →') : null),
+        alertas.length ? h('ul.alertas', alertas.slice(0, 12).map(a => h('li', h('button.alerta-enlace', { type: 'button', onclick: () => abrirPendiente(a) },
+          h('span.punto.p-' + a.nivel, { title: 'Prioridad ' + a.nivel }),
+          h('span', h('b', a.titulo), h('span.tenue.peq', areaDe(a).nombre + ' · ' + a.detalle)))))) : h('p.tenue', 'Sin alertas: todo al día.'),
+        alertas.length > 12 ? h('p.tenue.peq', '… y ' + (alertas.length - 12) + ' más' + (esTI() ? ' en Pendientes' : '')) : null),
       h('div.tarjeta', h('h2', 'Tickets del periodo'),
         h('div.ficha',
           h('div.dato', h('div.et', 'Registrados'), h('div.vl', String(tk.delPeriodo))),
@@ -142,7 +144,7 @@ ruta('/mantenimientos', cont => vistaEntidad(cont, 'mantenimientos', {
 
 // ======================= 2.6.5 SOFTWARE =======================
 ruta('/software', async cont => {
-  let pest = 0;
+  let pest = tomarPestana();
   const zona = h('div');
   const nombres = ['Inventario y licencias', 'Software por equipo', 'Actualizaciones y licenciamiento (RE-2.6.5-02)'];
   const barra = h('div.pestanas');
@@ -170,7 +172,7 @@ ruta('/software', async cont => {
 
 // ======================= 2.6.2 ACCESOS =======================
 ruta('/accesos', async cont => {
-  let pest = 0;
+  let pest = tomarPestana();
   const zona = h('div');
   const nombres = ['Solicitudes (RE-2.6.2-01)', 'Cuentas vigentes', 'Revisiones periódicas'];
   const barra = h('div.pestanas');
@@ -220,7 +222,7 @@ function ejecutarAcceso(a, rechazar, recargar) {
 
 // ======================= 2.6.8 DISPONIBILIDAD Y RESPALDOS =======================
 ruta('/disponibilidad', async cont => {
-  let pest = 0;
+  let pest = tomarPestana();
   const zona = h('div');
   const nombres = ['Disponibilidad mensual', 'Eventos de falla', 'Servicios medidos'];
   const barra = h('div.pestanas');
@@ -264,7 +266,7 @@ ruta('/respaldos', cont => vistaEntidad(cont, 'respaldos', {
 
 // ======================= 2.6.8 INDICADORES =======================
 ruta('/indicadores', async cont => {
-  let pest = 0;
+  let pest = tomarPestana();
   const zona = h('div');
   const nombres = ['Medición del periodo', 'Seguimiento (RE-2.6.8-01)', 'Mediciones registradas', 'Definición de indicadores'];
   const barra = h('div.pestanas');

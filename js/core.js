@@ -1,7 +1,8 @@
 /* Núcleo: DOM, API, estado, navegación, avisos y modales */
 'use strict';
 
-const App = { meta: null, token: null, rutas: {}, vistaActual: null };
+// pestanaInicial / buscarInicial: la próxima vista abre esa pestaña y filtra su tabla (enlaces desde Pendientes)
+const App = { meta: null, token: null, rutas: {}, vistaActual: null, pestanaInicial: 0, buscarInicial: '' };
 
 // ---------- DOM ----------
 /** h('div.clase#id', {atributos}, hijos...) */
@@ -266,10 +267,15 @@ async function mostrarRuta(r) {
   window.scrollTo(0, 0);
   try { await fn(cont, ...params); } catch (e) { if (cont.isConnected) { fallo(e); cont.append(h('div.tarjeta.vacio', 'No se pudo cargar: ' + e.message)); } }
   quitarEsq();
+  App.pestanaInicial = 0; App.buscarInicial = '';
   if (cont.isConnected) $('#contenido').focus({ preventScroll: true });
 }
 
-function inicioSegunRol() { return App.meta && !veTodo() ? '/mis-tickets' : '/'; }
+/** TI y administrador empiezan en sus pendientes; auditoría en el tablero; los demás en sus solicitudes */
+function inicioSegunRol() { return !App.meta ? '/' : esTI() ? '/pendientes' : veTodo() ? '/' : '/mis-tickets'; }
+
+/** Pestaña pedida por el enlace que abrió la vista (se usa una sola vez) */
+function tomarPestana() { const n = App.pestanaInicial || 0; App.pestanaInicial = 0; return n; }
 
 // ---------- Utilidades de datos ----------
 const Ent = nombre => App.meta.entidades[nombre];

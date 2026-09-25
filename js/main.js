@@ -9,7 +9,7 @@ function menuSegunRol() {
   if (rol === 'Solicitante') return [propios];
   if (rol === 'Talento Humano') return [propios, ['2.6.7 Capacitación', [['Capacitaciones', '/capacitaciones']]]];
   const grupos = [
-    ['General', [['Tablero', '/']]],
+    ['General', esTI() ? [['Pendientes', '/pendientes'], ['Tablero', '/']] : [['Tablero', '/']]],
     ['2.6.9 Incidentes y requerimientos', [['Tickets', '/tickets'], ['Base de conocimiento', '/conocimiento']]],
     ['2.6.1 Mantenimiento', [['Inventario de activos', '/activos'], ['Cronograma', '/cronograma'], ['Registro de mantenimiento', '/mantenimientos']]],
     ['2.6.5 Software', [['Software y licencias', '/software']]],
@@ -43,6 +43,7 @@ function pintarLayout() {
 
 /** Número de tickets activos en el menú (viene en meta: no hace falta otra consulta) */
 function actualizarConteos() {
+  pintarConteoPendientes(App.meta.pendientes);
   const n = App.meta.ticketsActivos;
   const el = document.querySelector('[data-conteo="/tickets"]');
   if (el && n !== null && n !== undefined) { el.textContent = n; el.classList.toggle('oculto', !n); }
@@ -117,6 +118,7 @@ async function iniciarApp(arranque) {
   const a = arranque || await srv('arranque');
   App.meta = a.meta;
   if (a.tablero) sembrarLectura('tablero', { periodo: a.tablero.periodo }, a.tablero.datos);
+  if (a.pendientes) sembrarLectura('pendientes', {}, a.pendientes);
   App.refs = {};
   pintarLayout();
   mostrarRuta(rutaInicial());
