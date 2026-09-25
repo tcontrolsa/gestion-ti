@@ -154,3 +154,37 @@ table.tabla { width: 100%; border-collapse: collapse; }
   .modal .cuerpo { overflow: visible; }
   .modal footer, .modal .cerrar, .avisos { display: none !important; }
 }
+
+/* ---------- Animaciones de carga ---------- */
+@keyframes giro { to { transform: rotate(360deg); } }
+@keyframes brillo { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+@keyframes aparecer { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes latido { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+
+.giro { display: inline-block; width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: giro .7s linear infinite; vertical-align: -3px; }
+
+/* Botón esperando al servidor: el texto se oculta y aparece un giro */
+.btn.ocupado { position: relative; color: transparent !important; pointer-events: none; }
+.btn.ocupado::after { content: ''; position: absolute; inset: 0; margin: auto; width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid var(--tinta-2); border-right-color: transparent; animation: giro .7s linear infinite; }
+.btn.primario.ocupado::after, .btn.peligro.ocupado::after { border-color: #fff; border-right-color: transparent; }
+
+/* Siluetas mientras llegan los datos */
+.esq { border-radius: 6px; margin: 6px 0; background: linear-gradient(90deg, #E9EEF4 0%, #F6F8FB 40%, #E9EEF4 80%); background-size: 200% 100%; animation: brillo 1.3s ease-in-out infinite; }
+.esqueleto .kpi { display: grid; gap: 2px; }
+.esq-tabla { padding: 10px 16px; }
+.esq-fila { display: flex; gap: 18px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--borde); }
+.esq-fila:last-child { border-bottom: 0; }
+.esq-fila .esq { margin: 0; }
+
+.aparecer { animation: aparecer .22s ease-out; }
+
+/* Pantalla de arranque (index.html) */
+.arranque { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 16px; color: var(--tenue); background: linear-gradient(160deg, #fff 0%, var(--fondo) 60%); }
+.arranque .logo { width: 56px; height: 56px; font-size: 20px; border-radius: 12px; animation: latido 1.6s ease-in-out infinite; }
+.arranque-texto { display: flex; gap: 10px; align-items: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .esq, .arranque .logo, .aparecer, .cargando { animation: none; }
+  .giro, .btn.ocupado::after { animation-duration: 2s; }
+}

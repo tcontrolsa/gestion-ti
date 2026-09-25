@@ -58,7 +58,7 @@ function pintarLogin(mensaje) {
       e.preventDefault();
       email = inp.value.trim();
       const b = form.querySelector('button'); b.disabled = true;
-      try { const r = await srv('auth.solicitarCodigo', { email }); aviso(r.mensaje); paso2(); }
+      try { const r = await pendiente(b, srv('auth.solicitarCodigo', { email })); aviso(r.mensaje); paso2(); }
       catch (err) { fallo(err); b.disabled = false; }
     };
     const form = h('form', { onsubmit: enviar },
@@ -73,7 +73,7 @@ function pintarLogin(mensaje) {
       e.preventDefault();
       const b = form.querySelector('button[type=submit]'); b.disabled = true;
       try {
-        const r = await srv('auth.verificarCodigo', { email, codigo: inp.value });
+        const r = await pendiente(b, srv('auth.verificarCodigo', { email, codigo: inp.value }));
         App.token = r.token;
         try { localStorage.setItem(CLAVE_SESION, r.token); } catch (x) { /* sin almacenamiento: la sesión dura lo que la pestaña */ }
         await iniciarApp(r.arranque);

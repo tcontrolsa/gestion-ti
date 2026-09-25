@@ -27,9 +27,10 @@ ruta('/', async cont => {
 
   async function cargar() {
     destruirGraficos();
-    vaciar(zona).append(h('div.vacio', 'Calculando…'));
+    vaciar(zona).append(esqueleto('kpis'));
     const d = await srv('tablero', { periodo });
     vaciar(zona);
+    zona.classList.remove('aparecer'); void zona.offsetWidth; zona.classList.add('aparecer');
     zona.append(h('div.kpis', d.indicadores.map(i => h('div.kpi' + (i.Cumple === true ? '.cumple' : i.Cumple === false ? '.nocumple' : ''), { title: i.Formula },
       h('div.nombre', i.Codigo + ' · ' + i.Nombre),
       h('div.valor', formatoIndicador(i)),
@@ -294,7 +295,7 @@ async function medicionPeriodo(zona, verSeguimiento) {
   } }, 'Registrar medición del periodo') : null;
   zona.append(h('div.filtros', h('label.peq', 'Periodo '), inp, registrar), res);
   async function calcular() {
-    vaciar(res).append(h('div.vacio', 'Calculando…'));
+    vaciar(res).append(esqueleto('tabla'));
     const ind = await srv('indicadores.calcular', { periodo: inp.value });
     vaciar(res).append(tabla({ buscar: false, filas: ind, orden: 'Codigo', desc: false, columnas: [
       { key: 'Codigo', label: 'Código' }, { key: 'Nombre', label: 'Indicador' }, { key: 'Procedimiento', label: 'Proc.' },

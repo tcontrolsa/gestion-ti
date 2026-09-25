@@ -14,6 +14,7 @@ function h(sel, attrs, ...hijos) {
   Object.entries(attrs || {}).forEach(([k, v]) => {
     if (v === null || v === undefined || v === false) return;
     if (k === 'value') valor = v;
+    else if (k === 'onclick' && el.tagName === 'BUTTON') el.addEventListener('click', ev => pendiente(el, v(ev)));
     else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
     else if (k === 'html') el.innerHTML = v;
     else el.setAttribute(k, v === true ? '' : v);
@@ -65,14 +66,44 @@ function insignia(v) {
   return t ? h('span.insignia' + (clase ? '.' + clase : ''), t) : '';
 }
 
-// ---------- API ----------
+// ---------- Indicadores de carga ----------
 let cargas = 0;
+const botonesPendientes = new Set();
 function indicadorCarga(delta) {
   cargas += delta;
   let el = $('#barra-carga');
-  if (cargas > 0 && !el) document.body.append(h('div.cargando#barra-carga'));
+  if (cargas > 0 && !el) document.body.append(h('div.cargando#barra-carga', { role: 'progressbar', 'aria-label': 'Cargando' }));
   if (cargas <= 0 && el) el.remove();
+  botonesPendientes.forEach(b => marcarOcupado(b));
 }
+/** El botón muestra un giro mientras su acción espera al servidor (no mientras espera una confirmación del usuario) */
+function marcarOcupado(b) {
+  const ocupado = cargas > 0 && botonesPendientes.has(b);
+  b.classList.toggle('ocupado', ocupado);
+  if (ocupado) b.setAttribute('aria-busy', 'true'); else b.removeAttribute('aria-busy');
+}
+function pendiente(boton, resultado) {
+  if (!resultado || typeof resultado.then !== 'function') return resultado;
+  botonesPendientes.add(boton);
+  marcarOcupado(boton);
+  const fin = () => { botonesPendientes.delete(boton); marcarOcupado(boton); };
+  resultado.then(fin, fin);
+  return resultado;
+}
+
+/** Siluetas grises animadas mientras llega el contenido: 'vista' (encabezado + tabla), 'kpis' o 'tabla' */
+function esqueleto(tipo) {
+  const barra = (ancho, alto) => h('div.esq', { style: 'width:' + ancho + ';height:' + (alto || 12) + 'px' });
+  const filas = n => h('div.tarjeta.esq-tabla', Array.from({ length: n }, (_, i) => h('div.esq-fila', barra('14%'), barra((40 + (i * 13) % 35) + '%'), barra('18%'))));
+  const kpis = () => h('div.kpis', Array.from({ length: 8 }, () => h('div.kpi', barra('70%', 10), barra('45%', 22), barra('60%', 10))));
+  const el = h('div.esqueleto', { 'aria-hidden': 'true' });
+  if (tipo === 'kpis') el.append(kpis(), h('div.rejilla.r2', h('div.tarjeta', barra('100%', 180)), h('div.tarjeta', barra('100%', 180))));
+  else if (tipo === 'tabla') el.append(filas(5));
+  else el.append(h('div.encabezado', h('div', barra('220px', 22), barra('140px', 10))), filas(8));
+  return el;
+}
+
+// ---------- API ----------
 
 // Acciones de solo lectura (igual que LECTURAS_ en Api.gs): se reutilizan unos minutos al navegar
 const LECTURAS = ['meta', 'arranque', 'listar', 'tickets.listar', 'tickets.detalle', 'accesos.cuentas', 'software.resumen', 'disponibilidad.calcularMes',
@@ -175,7 +206,9 @@ function modal({ titulo, cuerpo, botones, chico }) {
       if (!b.accion) return cerrar();
       const boton = ev.currentTarget;
       boton.disabled = true;
-      try { if ((await b.accion()) !== false) cerrar(); } catch (e) { fallo(e); } finally { boton.disabled = false; }
+      const r = (async () => b.accion())();
+      pendiente(boton, r);
+      try { if ((await r) !== false) cerrar(); } catch (e) { fallo(e); } finally { boton.disabled = false; }
     }
   }, b.texto)));
   const caja = h('div.modal' + (chico ? '.chico' : ''), { role: 'dialog', 'aria-modal': 'true', 'aria-label': titulo },
@@ -220,11 +253,19 @@ async function mostrarRuta(r) {
   document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('activo', r === a.dataset.ruta || (a.dataset.ruta !== '/' && r.startsWith(a.dataset.ruta + '/'))));
   $('.lateral') && $('.lateral').classList.remove('abierto');
   // Cada navegación dibuja en su propio contenedor: si una vista anterior responde tarde, queda fuera de la pantalla
+  // Silueta de carga hasta que la vista agregue su propio contenido
   const cont = h('div');
+  const esq = esqueleto();
+  cont.append(esq);
+  // (una vista puede agregar primero contenedores vacíos: se espera a que haya texto visible)
+  const obs = new MutationObserver(() => { if ([...cont.children].some(c => c !== esq && c.textContent.trim())) quitarEsq(); });
+  const quitarEsq = () => { if (esq.isConnected) { esq.remove(); cont.classList.add('aparecer'); } obs.disconnect(); };
+  obs.observe(cont, { childList: true, subtree: true, characterData: true });
   vaciar($('#contenido')).append(cont);
   App.vistaActual = r;
   window.scrollTo(0, 0);
   try { await fn(cont, ...params); } catch (e) { if (cont.isConnected) { fallo(e); cont.append(h('div.tarjeta.vacio', 'No se pudo cargar: ' + e.message)); } }
+  quitarEsq();
   if (cont.isConnected) $('#contenido').focus({ preventScroll: true });
 }
 
