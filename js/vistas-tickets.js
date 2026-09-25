@@ -20,7 +20,8 @@ function columnasTickets() {
 }
 
 ruta('/tickets', async cont => {
-  const todos = await srv('tickets.listar');
+  let todos = [];
+  let tabla_ = null;
   const grupos = [
     ['Activos', t => ESTADOS_ACTIVOS.includes(t.Estado)],
     ['Por confirmar', t => t.Estado === 'Resuelto'],
@@ -32,33 +33,55 @@ ruta('/tickets', async cont => {
     esTI() ? h('button.btn.primario', { onclick: () => ir('/tickets-nuevo') }, '+ Registrar ticket') : null));
   const pest = h('div.pestanas', { role: 'tablist' });
   const zona = h('div');
-  const pintar = () => {
+  const nota = h('p.tenue.peq');
+  const contar = () => {
     vaciar(pest);
     grupos.forEach(([n, f], i) => pest.append(h('button', { role: 'tab', 'aria-selected': String(i === actual), class: i === actual ? 'activo' : '', onclick: () => { actual = i; pintar(); } },
       n + ' (' + todos.filter(f).length + ')')));
-    vaciar(zona).append(tabla({
+  };
+  const pintar = () => {
+    contar();
+    tabla_ = tabla({
       columnas: columnasTickets(), filas: todos.filter(grupos[actual][1]), orden: 'Fecha_Apertura', desc: true,
       filtros: [{ key: 'Tipo', label: 'Tipo' }, { key: 'Prioridad', label: 'Prioridad' }, { key: 'Categoria', label: 'Categoría' }, { key: 'Estado', label: 'Estado' }],
       alClic: t => ir('/tickets/' + encodeURIComponent(t.ID_Ticket))
-    }));
+    });
+    vaciar(zona).append(tabla_);
   };
-  cont.append(pest, zona);
-  pintar();
+  cont.append(pest, nota, zona);
+  // Llegan primero los activos (en vivo) y después el archivo; un cambio en vivo no borra lo que el usuario filtró
+  await new Promise(listo => {
+    alSalirDeVista(fuenteTickets((ts, completo) => {
+      todos = ts;
+      nota.textContent = completo ? '' : 'Cargando tickets archivados…';
+      if (!tabla_) { pintar(); listo(); } else { contar(); tabla_.refrescar(todos.filter(grupos[actual][1])); }
+    }));
+  });
 });
 
 ruta('/mis-tickets', async cont => {
-  const mios = await srv('tickets.listar');
   cont.append(encabezado('Mis solicitudes', 'Incidentes y requerimientos que usted reportó',
     h('button.btn.primario', { onclick: () => ir('/tickets-nuevo') }, '+ Nueva solicitud')));
-  const porConfirmar = mios.filter(t => t.Estado === 'Resuelto');
-  if (porConfirmar.length) {
-    cont.append(h('div.tarjeta', { style: 'margin-bottom:16px;border-left:4px solid var(--alerta)' },
+  const avisoConfirmar = h('div');
+  let tabla_ = null;
+  cont.append(avisoConfirmar);
+  const pintarConfirmar = mios => {
+    const porConfirmar = mios.filter(t => t.Estado === 'Resuelto');
+    vaciar(avisoConfirmar).append(porConfirmar.length ? h('div.tarjeta', { style: 'margin-bottom:16px;border-left:4px solid var(--alerta)' },
       h('h2', 'Pendientes de su confirmación'),
       h('p.tenue', 'TI resolvió estas solicitudes. Confirme si quedaron solucionadas o indique qué falta.'),
-      h('ul', porConfirmar.map(t => h('li', h('a', { href: '#', onclick: e => { e.preventDefault(); ir('/tickets/' + t.ID_Ticket); } }, t.ID_Ticket + ' — ' + t.Titulo))))));
-  }
-  cont.append(tabla({ columnas: columnasTickets().filter(c => c.key !== 'Solicitante'), filas: mios, orden: 'Fecha_Apertura', desc: true,
-    vacio: 'Aún no ha registrado solicitudes.', alClic: t => ir('/tickets/' + encodeURIComponent(t.ID_Ticket)) }));
+      h('ul', porConfirmar.map(t => h('li', h('a', { href: '#', onclick: e => { e.preventDefault(); ir('/tickets/' + t.ID_Ticket); } }, t.ID_Ticket + ' — ' + t.Titulo))))) : '');
+  };
+  await new Promise(listo => {
+    alSalirDeVista(fuenteTickets(mios => {
+      pintarConfirmar(mios);
+      if (tabla_) return tabla_.refrescar(mios);
+      tabla_ = tabla({ columnas: columnasTickets().filter(c => c.key !== 'Solicitante'), filas: mios, orden: 'Fecha_Apertura', desc: true,
+        vacio: 'Aún no ha registrado solicitudes.', alClic: t => ir('/tickets/' + encodeURIComponent(t.ID_Ticket)) });
+      cont.append(tabla_);
+      listo();
+    }));
+  });
 });
 
 ruta('/tickets-nuevo', async cont => {
@@ -122,9 +145,14 @@ ruta('/tickets-nuevo', async cont => {
 });
 
 ruta('/tickets/:id', async (cont, id) => {
+  let vivo = false;
   const pintar = async () => {
-    const { ticket: t, historial, mantenimientos } = await srv('tickets.detalle', { id });
+    const d = await srv('tickets.detalle', { id });
+    const { ticket: t, historial, mantenimientos } = d;
+    vivo = !!d.vivo;
     vaciar(cont);
+    if (t._errorArchivo && esTI()) cont.append(h('div.tarjeta', { style: 'margin-bottom:12px;border-left:4px solid var(--mal)' },
+      h('b', 'No se pudo archivar este ticket: '), t._errorArchivo, h('div.tenue.peq', 'Corrija el dato indicado; se reintenta cada 10 minutos.')));
     const ti = esTI();
     const propio = t.Solicitante_Email && t.Solicitante_Email.toLowerCase() === App.meta.usuario.email.toLowerCase();
     const accion = (tipo, titulo, campos, extra) => ({ tipo, titulo, campos, extra });
@@ -170,6 +198,14 @@ ruta('/tickets/:id', async (cont, id) => {
       )));
   };
   await pintar();
+  // En vivo: si otra persona cambia el ticket, la pantalla se actualiza sola
+  if (vivo && modoFirebase()) {
+    let primera = true;
+    alSalirDeVista(Fb.db.collection('tickets').doc(id).onSnapshot(() => {
+      if (primera) { primera = false; return; }
+      if (!document.querySelector('.velo')) pintar().catch(fallo); // no interrumpe un formulario abierto
+    }, () => {}));
+  }
 });
 
 function conformidad(t, conforme, despues) {

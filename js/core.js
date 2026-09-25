@@ -2,7 +2,11 @@
 'use strict';
 
 // pestanaInicial / buscarInicial: la próxima vista abre esa pestaña y filtra su tabla (enlaces desde Pendientes)
-const App = { meta: null, token: null, rutas: {}, vistaActual: null, pestanaInicial: 0, buscarInicial: '' };
+const App = { meta: null, token: null, rutas: {}, vistaActual: null, pestanaInicial: 0, buscarInicial: '', alSalir: [] };
+/** Lo que la vista actual debe hacer al abandonarla (p. ej. dejar de escuchar cambios en vivo) */
+const alSalirDeVista = fn => App.alSalir.push(fn);
+/** Fase 1 Firebase activa (Fb se define en firebase.js) */
+const modoFirebase = () => typeof Fb !== 'undefined' && Fb.activo;
 
 // ---------- DOM ----------
 /** h('div.clase#id', {atributos}, hijos...) */
@@ -107,7 +111,7 @@ function esqueleto(tipo) {
 // ---------- API ----------
 
 // Acciones de solo lectura (igual que LECTURAS_ en Api.gs): se reutilizan unos minutos al navegar
-const LECTURAS = ['meta', 'arranque', 'listar', 'tickets.listar', 'tickets.detalle', 'accesos.cuentas', 'software.resumen', 'disponibilidad.calcularMes',
+const LECTURAS = ['meta', 'arranque', 'pendientes', 'tickets.historico', 'listar', 'tickets.listar', 'tickets.detalle', 'accesos.cuentas', 'software.resumen', 'disponibilidad.calcularMes',
   'indicadores.calcular', 'tablero', 'alertas', 'capacitaciones.encuestas', 'auditorias.informe'];
 const TTL_LECTURAS = 2 * 60 * 1000;
 const cacheLecturas = new Map();
@@ -121,7 +125,9 @@ const idSolicitud = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().
  * Las escrituras llevan idSolicitud para poder reintentarlas sin duplicar (ver api() en Api.gs).
  */
 function srv(accion, datos) {
-  const lectura = LECTURAS.includes(accion);
+  // Con Firebase, lo que se lee de Firestore ya es instantáneo y en vivo: no se guarda en memoria
+  const desdeFirestore = modoFirebase() && RUTAS_FIREBASE[accion];
+  const lectura = LECTURAS.includes(accion) && !(desdeFirestore && ['meta', 'tickets.detalle'].includes(accion));
   const cuerpo = { accion, datos: datos || {}, token: App.token };
   const clave = accion + '|' + JSON.stringify(cuerpo.datos);
   if (lectura) {
@@ -132,10 +138,13 @@ function srv(accion, datos) {
     vaciarCacheLecturas();
   }
   indicadorCarga(1);
-  const llamada = window.__DEV__ ? viaSimulador(cuerpo) : viaFetch(cuerpo);
+  const llamada = window.__DEV__ ? viaSimulador(cuerpo)
+    : desdeFirestore ? RUTAS_FIREBASE[accion](cuerpo.datos).then(data => ({ ok: true, data }), e => { throw fbError(e); })
+    : modoFirebase() ? llamarAppsScript(cuerpo)
+    : viaFetch(cuerpo);
   const p = llamada.then(r => {
     if (r && r.ok) return r.data;
-    if (r && r.sesionExpirada && App.token) { cerrarSesionLocal(); aviso(r.error, 'error'); }
+    if (r && r.sesionExpirada && App.token && !modoFirebase()) { cerrarSesionLocal(); aviso(r.error, 'error'); }
     throw new Error(r ? r.error : 'Sin respuesta del servidor');
   }).finally(() => {
     indicadorCarga(-1);
@@ -175,6 +184,28 @@ async function viaFetch(cuerpo) {
 /** Guarda en la memoria de lecturas un resultado que ya llegó (p. ej. el tablero dentro del arranque) */
 function sembrarLectura(accion, datos, resultado) {
   cacheLecturas.set(accion + '|' + JSON.stringify(datos || {}), { t: Date.now(), token: App.token, p: Promise.resolve(resultado) });
+}
+
+/** Modo Firebase: Apps Script con la sesión obtenida del token de Firebase (se renueva sola si vence) */
+async function llamarAppsScript(cuerpo) {
+  if (ACCIONES_SIN_SESION.includes(cuerpo.accion)) return viaFetch(cuerpo);
+  cuerpo.token = await fbSesionAppsScript();
+  let r = await viaFetch(cuerpo);
+  if (r && r.sesionExpirada) {
+    cuerpo.token = await fbSesionAppsScript(true);
+    r = await viaFetch(cuerpo);
+  }
+  return r;
+}
+const ACCIONES_SIN_SESION = ['auth.solicitarCodigo', 'auth.verificarCodigo', 'auth.firebase'];
+
+/** Para RUTAS_FIREBASE: lo que no está en Firestore (tickets archivados, resúmenes recalculados) va a Apps Script */
+async function viaAppsScript(accion, datos) {
+  const cuerpo = { accion, datos: datos || {} };
+  if (!LECTURAS.includes(accion)) cuerpo.idSolicitud = idSolicitud();
+  const r = await llamarAppsScript(cuerpo);
+  if (r && r.ok) return r.data;
+  throw new Error(r ? r.error : 'Sin respuesta del servidor');
 }
 
 function viaSimulador(cuerpo) {
@@ -254,6 +285,7 @@ async function mostrarRuta(r) {
   document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('activo', r === a.dataset.ruta || (a.dataset.ruta !== '/' && r.startsWith(a.dataset.ruta + '/'))));
   $('.lateral') && $('.lateral').classList.remove('abierto');
   // Cada navegación dibuja en su propio contenedor: si una vista anterior responde tarde, queda fuera de la pantalla
+  App.alSalir.splice(0).forEach(fn => { try { fn(); } catch (e) { /* nada */ } });
   // Silueta de carga hasta que la vista agregue su propio contenido
   const cont = h('div');
   const esq = esqueleto();

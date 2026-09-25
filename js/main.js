@@ -51,6 +51,7 @@ function actualizarConteos() {
 
 // ---------- Login ----------
 function pintarLogin(mensaje) {
+  if (modoFirebase()) return pintarLoginEnlace(mensaje);
   let email = '';
   const caja = h('div.login-caja');
   const paso1 = () => {
@@ -89,21 +90,87 @@ function pintarLogin(mensaje) {
   vaciar(document.body).append(h('main.login', caja));
   paso1();
 }
+/** Modo Firebase: se envía un enlace de un solo uso; al abrirlo en este navegador se ingresa directo */
+function pintarLoginEnlace(mensaje) {
+  let correo = '';
+  try { correo = localStorage.getItem(CLAVE_CORREO_INGRESO) || ''; } catch (e) { /* nada */ }
+  const caja = h('div.login-caja');
+  const pedir = () => {
+    const inp = h('input', { type: 'email', id: 'lg-email', autocomplete: 'email', placeholder: 'nombre@tcontrolsa.com', required: true, value: correo });
+    const form = h('form', { onsubmit: async e => {
+      e.preventDefault();
+      correo = inp.value.trim();
+      const b = form.querySelector('button'); b.disabled = true;
+      try { await pendiente(b, srvLocal(() => fbEnviarEnlace(correo))); enviado(); }
+      catch (err) { fallo(err); b.disabled = false; }
+    } },
+      h('div.campo', h('label', { for: 'lg-email' }, 'Correo corporativo'), inp),
+      h('button.btn.primario', { type: 'submit', style: 'width:100%;justify-content:center;margin-top:14px' }, 'Enviarme el enlace de ingreso'));
+    vaciar(caja).append(marcaLogin(), h('p', mensaje || 'Ingrese su correo. Le enviaremos un enlace para entrar con un clic; no necesita contraseña.'), form);
+    setTimeout(() => inp.focus(), 20);
+  };
+  const enviado = () => {
+    vaciar(caja).append(marcaLogin(),
+      h('div.enlace-enviado', h('div.sobre', { 'aria-hidden': 'true' }, '✉'), h('h2', 'Revise su correo'),
+        h('p', 'Enviamos un enlace de ingreso a ', h('b', correo), '. Ábralo en este mismo navegador; puede cerrar esta pestaña.'),
+        h('p.tenue.peq', 'Si no llega en un par de minutos, revise el correo no deseado. El enlace es de un solo uso.')),
+      h('button.btn', { type: 'button', style: 'width:100%;justify-content:center;margin-top:8px', onclick: () => pendiente(event.currentTarget, srvLocal(() => fbEnviarEnlace(correo))).then(() => aviso('Enlace reenviado', 'ok'), fallo) }, 'Reenviar el enlace'),
+      h('button.btn', { type: 'button', style: 'width:100%;justify-content:center;margin-top:8px', onclick: pedir }, 'Usar otro correo'));
+  };
+  vaciar(document.body).append(h('main.login', caja));
+  pedir();
+}
+
+/** El enlace se abrió en otro navegador: se confirma el correo antes de ingresar */
+function pedirCorreoEnlace() {
+  return new Promise(res => {
+    const inp = h('input', { type: 'email', id: 'lg-email', autocomplete: 'email', required: true });
+    const caja = h('div.login-caja', marcaLogin(), h('p', 'Para completar el ingreso, confirme su correo.'),
+      h('form', { onsubmit: e => { e.preventDefault(); res(inp.value.trim().toLowerCase()); } },
+        h('div.campo', h('label', { for: 'lg-email' }, 'Correo corporativo'), inp),
+        h('button.btn.primario', { type: 'submit', style: 'width:100%;justify-content:center;margin-top:14px' }, 'Ingresar')));
+    vaciar(document.body).append(h('main.login', caja));
+    setTimeout(() => inp.focus(), 20);
+  });
+}
+
+/** Promesa con barra de carga, para acciones del navegador que no pasan por srv() */
+function srvLocal(fn) {
+  indicadorCarga(1);
+  return Promise.resolve().then(fn).finally(() => indicadorCarga(-1));
+}
+
 const marcaLogin = () => h('div.login-marca', h('div.logo', 'TC'), h('div', h('h1', 'Gestión TI'), h('div.tenue.peq', 'Tcontrol · Soporte tecnológico')));
 
 async function salir() {
-  try { await srv('auth.cerrarSesion', { token: App.token }); } catch (e) { /* ya expirada */ }
+  if (App.token) { try { await srv('auth.cerrarSesion', { token: App.token }); } catch (e) { /* ya expirada */ } }
   cerrarSesionLocal();
 }
 
 function cerrarSesionLocal() {
   App.token = null; App.meta = null; App.refs = {};
   vaciarCacheLecturas();
+  App.alSalir.splice(0).forEach(fn => { try { fn(); } catch (e) { /* nada */ } });
+  if (modoFirebase()) fbSalir();
   try { localStorage.removeItem(CLAVE_SESION); sessionStorage.removeItem(CLAVE_SESION); } catch (e) { /* nada */ }
   pintarLogin('Sesión cerrada. Ingrese su correo para volver a entrar.');
 }
 
 // ---------- Arranque ----------
+/** Modo Firebase: completar el enlace si se abrió desde el correo; la sesión de Firebase se recuerda sola */
+async function arrancarFirebase() {
+  try {
+    if (await fbCompletarEnlace(pedirCorreoEnlace)) {
+      App.token = null; // la sesión de Apps Script de otro usuario no sirve
+      try { localStorage.removeItem(CLAVE_SESION); } catch (e) { /* nada */ }
+    }
+  } catch (e) { return pintarLogin(e.message); }
+  if (!(await fbUsuarioActual())) return pintarLogin();
+  try { App.token = localStorage.getItem(CLAVE_SESION); } catch (e) { App.token = null; }
+  try { await iniciarApp(await fbArranque()); }
+  catch (e) { if (Fb.auth.currentUser) pintarErrorArranque(e); else pintarLogin(e.message); }
+}
+
 function pintarErrorArranque(e) {
   const caja = h('div.login-caja', marcaLogin(), h('p', e.message),
     h('button.btn.primario', { style: 'width:100%;justify-content:center', onclick: async ev => {
@@ -115,12 +182,13 @@ function pintarErrorArranque(e) {
 
 /** arranque = {meta, tablero}: llega con el ingreso o se pide en un solo viaje al servidor */
 async function iniciarApp(arranque) {
-  const a = arranque || await srv('arranque');
+  const a = arranque || await (modoFirebase() ? fbArranque() : srv('arranque'));
   App.meta = a.meta;
   if (a.tablero) sembrarLectura('tablero', { periodo: a.tablero.periodo }, a.tablero.datos);
   if (a.pendientes) sembrarLectura('pendientes', {}, a.pendientes);
   App.refs = {};
   pintarLayout();
+  if (modoFirebase()) fbEscucharConteo();
   mostrarRuta(rutaInicial());
 }
 
@@ -128,6 +196,7 @@ function rutaInicial() { return rutaActual() === '/' ? inicioSegunRol() : rutaAc
 
 document.addEventListener('DOMContentLoaded', async () => {
   window.addEventListener('hashchange', () => mostrarRuta(rutaActual()));
+  if (fbIniciar()) return arrancarFirebase();
   // La sesión se recuerda en el navegador (vence tras 6 h sin uso o al pulsar Salir): abrir otra pestaña no pide código
   try { App.token = localStorage.getItem(CLAVE_SESION) || sessionStorage.getItem(CLAVE_SESION); } catch (e) { App.token = null; }
   if (!App.token) return pintarLogin();

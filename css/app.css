@@ -258,3 +258,10 @@ table.tabla { width: 100%; border-collapse: collapse; }
   .pend-nivel, .pend-tarea { transition: none; }
   .pend-nivel:hover, .pend-tarea:hover { transform: none; }
 }
+
+/* Ingreso por enlace (modo Firebase) */
+.enlace-enviado { text-align: center; }
+.enlace-enviado h2 { margin: 8px 0 6px; }
+.enlace-enviado p { margin: 0 0 10px; }
+.enlace-enviado .sobre { width: 56px; height: 56px; margin: 4px auto 0; border-radius: 50%; display: grid; place-items: center; font-size: 26px;
+  background: var(--info-bg); color: var(--info); animation: aparecer .3s ease-out; }
