@@ -1,0 +1,199 @@
+/* Núcleo: DOM, API, estado, navegación, avisos y modales */
+'use strict';
+
+const App = { meta: null, token: null, rutas: {}, vistaActual: null };
+
+// ---------- DOM ----------
+/** h('div.clase#id', {atributos}, hijos...) */
+function h(sel, attrs, ...hijos) {
+  const m = sel.match(/^([a-z0-9]+)?((?:[.#][\w-]+)*)$/i);
+  const el = document.createElement(m[1] || 'div');
+  (m[2].match(/[.#][\w-]+/g) || []).forEach(p => { if (p[0] === '.') el.classList.add(p.slice(1)); else el.id = p.slice(1); });
+  if (attrs && (typeof attrs !== 'object' || attrs instanceof Node || Array.isArray(attrs))) { hijos.unshift(attrs); attrs = null; }
+  let valor;
+  Object.entries(attrs || {}).forEach(([k, v]) => {
+    if (v === null || v === undefined || v === false) return;
+    if (k === 'value') valor = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'html') el.innerHTML = v;
+    else el.setAttribute(k, v === true ? '' : v);
+  });
+  hijos.flat(Infinity).forEach(c => { if (c !== null && c !== undefined && c !== false) el.append(c instanceof Node ? c : String(c)); });
+  if (valor !== undefined) el.value = valor;
+  return el;
+}
+const $ = (s, r) => (r || document).querySelector(s);
+const vaciar = el => { while (el.firstChild) el.removeChild(el.firstChild); return el; };
+
+// ---------- Formatos ----------
+const CAMPOS_PORCENTAJE = ['Disponibilidad', 'Porcentaje_Asistencia', 'Satisfaccion', 'Cumplimiento', 'Avance'];
+const Fmt = {
+  fecha: v => v ? String(v).slice(0, 10) : '',
+  fechaHora: v => v ? String(v).slice(0, 16).replace('T', ' ') : '',
+  horas: v => v === '' || v === null || v === undefined ? '' : Number(v).toFixed(2).replace(/\.00$/, '') + ' h',
+  pct: v => v === '' || v === null || v === undefined ? '—' : (Number(v) * 100).toFixed(1) + ' %',
+  num: v => v === '' || v === null || v === undefined ? '' : Number(v).toLocaleString('es-EC'),
+  hoy: () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); },
+  ahora: () => { const d = new Date(); return Fmt.hoy() + 'T' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); },
+  periodoActual: () => Fmt.hoy().slice(0, 7),
+  valor(f, v) {
+    if (v === '' || v === null || v === undefined) return '';
+    if (f.type === 'date') return Fmt.fecha(v);
+    if (f.type === 'datetime') return Fmt.fechaHora(v);
+    if (f.type === 'number') return /Horas/.test(f.key) ? Fmt.horas(v) : (CAMPOS_PORCENTAJE.includes(f.key) ? Fmt.pct(v) : Fmt.num(v));
+    return String(v);
+  }
+};
+
+/** Insignia de color según el valor */
+function insignia(v) {
+  const t = String(v || '');
+  const clase = {
+    'Cerrado': 'i-ok', 'Ejecutado': 'i-ok', 'Ejecutada': 'i-ok', 'SI': 'i-ok', 'Conforme': 'i-ok', 'Vigente': 'i-ok', 'Operativo': 'i-ok', 'Exitoso': 'i-ok', 'Cerrada eficaz': 'i-ok', 'Publicado': 'i-ok', 'Activo': 'i-ok',
+    'NO': 'i-mal', 'Vencida': 'i-mal', 'No Conforme': 'i-mal', 'Fallido': 'i-mal', 'Rechazada': 'i-mal', 'Alta': 'i-mal', 'Reabierto': 'i-mal', 'Cerrada no eficaz': 'i-mal', 'No operativo': 'i-mal', 'De Baja': 'i-mal', 'Alto': 'i-mal',
+    'Abierto': 'i-alerta', 'Pendiente': 'i-alerta', 'PENDIENTE': 'i-alerta', 'Por vencer': 'i-alerta', 'Media': 'i-alerta', 'Programado': 'i-alerta', 'Reprogramado': 'i-alerta', 'Abierta': 'i-alerta', 'Parcial': 'i-alerta', 'En Espera de Tercero': 'i-alerta', 'En Mantenimiento': 'i-alerta', 'Medio': 'i-alerta',
+    'En Proceso': 'i-info', 'Resuelto': 'i-info', 'En curso': 'i-info', 'Baja': 'i-info', 'Cerrado por TI': 'i-info',
+    'Realizada': 'i-ok', 'Cumple': 'i-ok', 'Notificada': 'i-ok', 'Cerrada': 'i-ok', 'Bajo': 'i-ok', 'Aceptado': 'i-ok',
+    'Extremo': 'i-mal', 'Detectado': 'i-mal', 'No cumple': 'i-mal',
+    'Planificada': 'i-alerta', 'Reprogramada': 'i-alerta', 'En análisis': 'i-alerta', 'Por evaluar': 'i-alerta', 'Con acciones abiertas': 'i-alerta',
+    'Confirmada': 'i-info', 'Contenido': 'i-info', 'Evaluado': 'i-info', 'En tratamiento': 'i-info',
+    'Viable': 'i-ok', 'Implementada': 'i-ok', 'Aprobado': 'i-ok', 'Completado': 'i-ok',
+    'No viable': 'i-mal', 'Rechazado': 'i-mal',
+    'Viable con condiciones': 'i-alerta', 'Identificada': 'i-alerta', 'Idea': 'i-alerta', 'No iniciado': 'i-alerta', 'En pausa': 'i-alerta',
+    'En evaluación': 'i-info', 'En adquisición': 'i-info', 'En implementación': 'i-info', 'En ejecución': 'i-info', 'En progreso': 'i-info', 'En revisión': 'i-info'
+  }[t] || '';
+  return t ? h('span.insignia' + (clase ? '.' + clase : ''), t) : '';
+}
+
+// ---------- API ----------
+let cargas = 0;
+function indicadorCarga(delta) {
+  cargas += delta;
+  let el = $('#barra-carga');
+  if (cargas > 0 && !el) document.body.append(h('div.cargando#barra-carga'));
+  if (cargas <= 0 && el) el.remove();
+}
+
+/** Llama a la API de Apps Script. En desarrollo (dev/index.html) usa el simulador local. */
+function srv(accion, datos) {
+  const cuerpo = { accion, datos: datos || {}, token: App.token };
+  indicadorCarga(1);
+  const llamada = window.__DEV__ ? viaSimulador(cuerpo) : viaFetch(cuerpo);
+  return llamada.then(r => {
+    if (r && r.ok) return r.data;
+    if (r && r.sesionExpirada && App.token) { cerrarSesionLocal(); aviso(r.error, 'error'); }
+    throw new Error(r ? r.error : 'Sin respuesta del servidor');
+  }).finally(() => indicadorCarga(-1));
+}
+
+async function viaFetch(cuerpo) {
+  const url = (window.GTI_CONFIG || {}).API_URL;
+  if (!url) throw new Error('Falta configurar la URL de la API en config.js.');
+  let res;
+  try {
+    // text/plain evita la consulta previa (preflight) de CORS, que Apps Script no responde
+    res = await fetch(url, { method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(cuerpo) });
+  } catch (e) {
+    throw new Error('No se pudo conectar con el servidor. Revise su conexión e intente de nuevo.');
+  }
+  if (!res.ok) throw new Error('El servidor respondió con error ' + res.status + '.');
+  try { return await res.json(); } catch (e) { throw new Error('Respuesta inválida del servidor (¿la implementación permite acceso a "Cualquier usuario"?).'); }
+}
+
+function viaSimulador(cuerpo) {
+  return new Promise((resolve, reject) => google.script.run.withSuccessHandler(resolve)
+    .withFailureHandler(e => reject(new Error(e && e.message ? e.message : String(e)))).api(cuerpo));
+}
+
+// ---------- Avisos y modales ----------
+function aviso(texto, tipo) {
+  let caja = $('.avisos');
+  if (!caja) { caja = h('div.avisos', { role: 'status', 'aria-live': 'polite' }); document.body.append(caja); }
+  const el = h('div.aviso' + (tipo ? '.' + tipo : ''), texto);
+  caja.append(el);
+  setTimeout(() => el.remove(), tipo === 'error' ? 7000 : 3500);
+}
+
+/** Muestra un error de la API sin romper la vista */
+const fallo = e => aviso(e.message || String(e), 'error');
+
+function modal({ titulo, cuerpo, botones, chico }) {
+  const anterior = document.activeElement;
+  const velo = h('div.velo');
+  const cerrar = () => { velo.remove(); document.removeEventListener('keydown', esc); if (anterior && anterior.focus) anterior.focus(); };
+  const esc = e => { if (e.key === 'Escape') cerrar(); };
+  document.addEventListener('keydown', esc);
+  const pie = h('footer');
+  (botones || [{ texto: 'Cerrar' }]).forEach(b => pie.append(h('button.btn' + (b.primario ? '.primario' : '') + (b.peligro ? '.peligro' : ''), {
+    type: 'button',
+    onclick: async ev => {
+      if (!b.accion) return cerrar();
+      const boton = ev.currentTarget;
+      boton.disabled = true;
+      try { if ((await b.accion()) !== false) cerrar(); } catch (e) { fallo(e); } finally { boton.disabled = false; }
+    }
+  }, b.texto)));
+  const caja = h('div.modal' + (chico ? '.chico' : ''), { role: 'dialog', 'aria-modal': 'true', 'aria-label': titulo },
+    h('header', h('h2', { style: 'margin:0' }, titulo), h('button.cerrar', { type: 'button', 'aria-label': 'Cerrar', onclick: cerrar }, '×')),
+    h('div.cuerpo', cuerpo), pie);
+  velo.append(caja);
+  velo.addEventListener('mousedown', e => { if (e.target === velo) cerrar(); });
+  document.body.append(velo);
+  const foco = caja.querySelector('input, select, textarea') || caja.querySelector('footer .btn.primario');
+  if (foco) setTimeout(() => foco.focus(), 30);
+  return { cerrar };
+}
+
+function confirmar(titulo, texto) {
+  return new Promise(res => modal({ titulo, chico: true, cuerpo: h('p', texto), botones: [
+    { texto: 'Cancelar', accion: () => { res(false); } },
+    { texto: 'Confirmar', primario: true, accion: () => { res(true); } }] }));
+}
+
+// ---------- Navegación por hash (#/ruta): permite enlaces directos desde los correos ----------
+function ir(ruta) {
+  if (location.hash.slice(1) !== ruta) location.hash = ruta;
+  else mostrarRuta(ruta);
+}
+
+function rutaActual() { return (location.hash || '').replace(/^#/, '') || '/'; }
+
+function ruta(patron, fn) { App.rutas[patron] = fn; }
+
+async function mostrarRuta(r) {
+  r = r || '/';
+  if (!App.meta) return;
+  const partes = r.split('/').filter(Boolean);
+  let fn = null, params = [];
+  Object.keys(App.rutas).forEach(p => {
+    const pp = p.split('/').filter(Boolean);
+    if (pp.length !== partes.length) return;
+    const ps = [];
+    if (pp.every((x, i) => x.startsWith(':') ? (ps.push(decodeURIComponent(partes[i])), true) : x === partes[i])) { fn = App.rutas[p]; params = ps; }
+  });
+  if (!fn) fn = App.rutas[inicioSegunRol()];
+  document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('activo', r === a.dataset.ruta || (a.dataset.ruta !== '/' && r.startsWith(a.dataset.ruta + '/'))));
+  $('.lateral') && $('.lateral').classList.remove('abierto');
+  // Cada navegación dibuja en su propio contenedor: si una vista anterior responde tarde, queda fuera de la pantalla
+  const cont = h('div');
+  vaciar($('#contenido')).append(cont);
+  App.vistaActual = r;
+  window.scrollTo(0, 0);
+  try { await fn(cont, ...params); } catch (e) { if (cont.isConnected) { fallo(e); cont.append(h('div.tarjeta.vacio', 'No se pudo cargar: ' + e.message)); } }
+  if (cont.isConnected) $('#contenido').focus({ preventScroll: true });
+}
+
+function inicioSegunRol() { return App.meta && !veTodo() ? '/mis-tickets' : '/'; }
+
+// ---------- Utilidades de datos ----------
+const Ent = nombre => App.meta.entidades[nombre];
+const Cat = nombre => (App.meta.catalogos[nombre] || []);
+const esTI = () => ['Especialista TI', 'Administrador'].includes(App.meta.usuario.rol);
+const esAdmin = () => App.meta.usuario.rol === 'Administrador';
+/** TI y auditoría ven todos los tickets y el tablero */
+const veTodo = () => esTI() || App.meta.usuario.rol === 'Auditor SGI';
+
+/** Encabezado estándar de una vista */
+function encabezado(titulo, codigo, ...acciones) {
+  return h('div.encabezado', h('div', h('h1', titulo), codigo ? h('div.codigo', codigo) : null), h('div.acciones', acciones));
+}
